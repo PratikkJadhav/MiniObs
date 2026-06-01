@@ -14,6 +14,7 @@ type Receiver struct {
 func (r *Receiver) Export(ctx context.Context, req *collectorv1.ExportTraceServiceRequest) (*collectorv1.ExportTraceServiceResponse, error) {
 	out := new(collectorv1.ExportTraceServiceResponse)
 	for _, rs := range req.GetResourceSpans() {
+
 		for _, ss := range rs.GetScopeSpans() {
 			for _, span := range ss.GetSpans() {
 				fmt.Println(span.GetName())

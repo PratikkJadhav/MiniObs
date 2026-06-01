@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -49,5 +50,31 @@ func (s *Store) Write(span *tracepb.Span) error {
 	err := s.index.Add(traceID, serviceName, loc)
 
 	return nil
+
+}
+
+func (s *Store) Read(traceID string) ([]*tracepb.Span, error) {
+	locs := s.index.GetTrace(traceID)
+
+	var spans []*tracepb.Span
+
+	for _, loc := range locs {
+		spanBytes, err := s.segment.Read(loc)
+		if err != nil {
+			return nil, err
+		}
+
+		span := &tracepb.Span{}
+
+		err = proto.Unmarshal(spanBytes, span)
+		if err != nil {
+			return nil, err
+		}
+
+		spans = append(spans, span)
+
+	}
+
+	return spans, nil
 
 }
