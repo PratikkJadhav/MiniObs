@@ -39,15 +39,19 @@ func NewStore(dir string) (*Store, error) {
 
 }
 
-func (s *Store) Write(span *tracepb.Span) error {
+func (s *Store) Write(serviceName string, span *tracepb.Span) error {
 	spanBytes, err := proto.Marshal(span)
 	if err != nil {
 		return err
 	}
 
-	loc := s.Write(spanBytes)
+	loc, err := s.segment.Write(spanBytes)
+
+	if err != nil {
+		return err
+	}
 	traceID := hex.EncodeToString(span.GetTraceId())
-	err := s.index.Add(traceID, serviceName, loc)
+	s.index.Add(traceID, serviceName, loc)
 
 	return nil
 
