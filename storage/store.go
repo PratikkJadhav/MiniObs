@@ -46,7 +46,6 @@ func (s *Store) Write(serviceName string, span *tracepb.Span) error {
 	}
 
 	loc, err := s.segment.Write(spanBytes)
-
 	if err != nil {
 		return err
 	}
@@ -81,4 +80,17 @@ func (s *Store) Read(traceID string) ([]*tracepb.Span, error) {
 
 	return spans, nil
 
+}
+
+func (s *Store) GetServices() []string {
+	var slice []string
+
+	slice = s.index.GetServices()
+
+	return slice
+}
+
+func (s *Store) GetTraceIDs(serviceName string) []string {
+
+	return s.index.GetTracesByService(serviceName)
 }

@@ -39,3 +39,23 @@ func (idx *index) GetTrace(traceID string) []location {
 
 	return idx.traces[traceID]
 }
+
+func (idx *index) GetServices() []string {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+
+	var serviceSlice []string
+	for serviceName := range idx.services {
+		serviceSlice = append(serviceSlice, serviceName)
+	}
+
+	return serviceSlice
+}
+
+func (idx *index) GetTracesByService(serviceName string) []string {
+
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+
+	return idx.services[serviceName]
+}
