@@ -94,3 +94,7 @@ func (s *Store) GetTraceIDs(serviceName string) []string {
 
 	return s.index.GetTracesByService(serviceName)
 }
+
+func (s *Store) GetTraceByID(traceID string) ([]*tracepb.Span, error) {
+	return s.Read(traceID)
+}
