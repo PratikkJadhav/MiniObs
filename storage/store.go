@@ -1,17 +1,24 @@
 package storage
 
 import (
+	"bufio"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
 	"google.golang.org/protobuf/proto"
 )
 
 type Store struct {
-	segment *segment
-	index   *index
+	segment       *segment
+	index         *index
+	currentFileID uint32
+	currentSize   int64
+	dir           string
 }
 
 func NewStore(dir string) (*Store, error) {
@@ -19,8 +26,9 @@ func NewStore(dir string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, err
 	}
-
-	filePath := filepath.Join(dir, "seg-000001.dat")
+	fileID := uint32(1)
+	file := fmt.Sprintf("seg-%06d.dat", fileID)
+	filePath := filepath.Join(dir, file)
 
 	seg, err := openSegment(1, filePath)
 	if err != nil {
@@ -31,12 +39,19 @@ func NewStore(dir string) (*Store, error) {
 		traces:   make(map[string][]location),
 		services: make(map[string][]string),
 	}
+	s := &Store{
+		segment:       seg,
+		index:         idx,
+		currentFileID: fileID,
+		currentSize:   0,
+		dir:           dir,
+	}
 
-	return &Store{
-		segment: seg,
-		index:   idx,
-	}, nil
+	if err := s.loadHint(); err != nil {
+		return nil, err
+	}
 
+	return s, nil
 }
 
 func (s *Store) Write(serviceName string, span *tracepb.Span) error {
@@ -49,9 +64,24 @@ func (s *Store) Write(serviceName string, span *tracepb.Span) error {
 	if err != nil {
 		return err
 	}
+
+	s.currentSize += int64(4 + len(spanBytes))
+
+	if s.currentSize >= 64*1024*1024 {
+		s.currentFileID++
+		s.currentSize = 0
+
+		newFile := fmt.Sprintf("seg-%06d.dat", s.currentFileID)
+		newPath := filepath.Join(s.dir, newFile)
+
+		newSeg, err := openSegment(s.currentFileID, newPath)
+		if err != nil {
+			return err
+		}
+		s.segment = newSeg
+	}
 	traceID := hex.EncodeToString(span.GetTraceId())
 	s.index.Add(traceID, serviceName, loc)
-
 	return nil
 
 }
@@ -97,4 +127,81 @@ func (s *Store) GetTraceIDs(serviceName string) []string {
 
 func (s *Store) GetTraceByID(traceID string) ([]*tracepb.Span, error) {
 	return s.Read(traceID)
+}
+
+func (idx *index) All() map[string][]location {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	return idx.traces
+}
+
+func (idx *index) GetServiceForTrace(traceID string) string {
+	for serviceName, traceIDs := range idx.services {
+		for _, id := range traceIDs {
+			if id == traceID {
+				return serviceName
+			}
+		}
+	}
+	return ""
+}
+
+func (s *Store) SaveHint() error {
+	hintPath := filepath.Join(s.dir, "hint.dat")
+	f, err := os.Create(hintPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	for traceID, locs := range s.index.All() {
+		serviceName := s.index.GetServiceForTrace(traceID)
+		for _, loc := range locs {
+			fmt.Fprintf(f, "%s|%d|%d|%d|%s\n",
+				traceID, loc.fileID, loc.offset, loc.size, serviceName)
+		}
+	}
+	return nil
+}
+
+func (s *Store) loadHint() error {
+	hintPath := filepath.Join(s.dir, "hint.dat")
+
+	f, err := os.Open(hintPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // first startup, no hint file yet, that's fine
+		}
+		return err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		parts := strings.Split(line, "|")
+
+		if len(parts) != 5 {
+			continue // skip malformed lines
+		}
+
+		traceID := parts[0]
+		fileID, _ := strconv.ParseUint(parts[1], 10, 32)
+		offset, _ := strconv.ParseInt(parts[2], 10, 64)
+		size, _ := strconv.ParseUint(parts[3], 10, 32)
+
+		serviceName := parts[4]
+
+		loc := location{
+			fileID: uint32(fileID),
+			offset: offset,
+			size:   uint32(size),
+		}
+
+		s.index.Add(traceID, serviceName, loc)
+
+	}
+
+	return scanner.Err()
+
 }

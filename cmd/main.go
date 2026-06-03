@@ -4,6 +4,9 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/PratikkJadhav/MiniObs/api"
 	"github.com/PratikkJadhav/MiniObs/receiver"
@@ -34,9 +37,15 @@ func main() {
 	}()
 
 	r := api.NewRouter(store)
-	log.Println("Starting HTTP API")
+	go func() {
+		log.Println("Starting HTTP API on :8080")
+		if err := http.ListenAndServe(":8080", r); err != nil {
+			log.Fatalf("HTTP server crashed: %v", err)
+		}
+	}()
 
-	if err := http.ListenAndServe(":8080", r); err != nil {
-		log.Fatalf("HTTP server crashed: %v", err)
-	}
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	store.SaveHint()
 }
