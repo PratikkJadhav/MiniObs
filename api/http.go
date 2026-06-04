@@ -9,8 +9,30 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+func withCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func NewRouter(store *storage.Store) http.Handler {
 	r := chi.NewRouter()
+
+	r.Use(withCORS)
+
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "ui/index.html")
+	})
+	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"status":"ok"}`))
+	})
 	r.Get("/api/services", func(w http.ResponseWriter, r *http.Request) {
 		services := store.GetServices()
 		jsonData, _ := json.Marshal(services)
@@ -20,15 +42,26 @@ func NewRouter(store *storage.Store) http.Handler {
 	})
 	r.Get("/api/traces", func(w http.ResponseWriter, r *http.Request) {
 		service := r.URL.Query().Get("service")
+		var summaries []storage.TraceSummary
 		if service == "" {
-			http.Error(w, "service param required", http.StatusBadRequest)
-			return
+			for _, svc := range store.GetServices() {
+				s, err := store.GetTraceSummaries(svc)
+				if err != nil {
+					http.Error(w, "failed to read traces", http.StatusInternalServerError)
+					return
+				}
+				summaries = append(summaries, s...)
+			}
+		} else {
+			var err error
+			summaries, err = store.GetTraceSummaries(service)
+			if err != nil {
+				http.Error(w, "failed to read traces", http.StatusInternalServerError)
+				return
+			}
 		}
-		services := store.GetTraceIDs(service)
-		jsonData, _ := json.Marshal(services)
-
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(jsonData)
+		result := map[string]interface{}{"traces": summaries}
+		json.NewEncoder(w).Encode(result)
 	})
 	r.Get("/api/traces/{traceID}", func(w http.ResponseWriter, r *http.Request) {
 		traceID := chi.URLParam(r, "traceID")

@@ -21,6 +21,15 @@ type Store struct {
 	dir           string
 }
 
+type TraceSummary struct {
+	TraceID           string `json:"trace_id"`
+	ServiceName       string `json:"service_name"`
+	Name              string `json:"name"`
+	DurationNs        uint64 `json:"duration_ns"`
+	StartTimeUnixNano uint64 `json:"start_time_unix_nano"`
+	Status            int    `json:"status"`
+}
+
 func NewStore(dir string) (*Store, error) {
 
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -204,4 +213,34 @@ func (s *Store) loadHint() error {
 
 	return scanner.Err()
 
+}
+
+func (s *Store) GetTraceSummaries(serviceName string) ([]TraceSummary, error) {
+	traceIDs := s.GetTraceIDs(serviceName)
+	var summaries []TraceSummary
+
+	for _, traceID := range traceIDs {
+		spans, err := s.Read(traceID)
+		if err != nil {
+			return nil, err
+		}
+		if len(spans) == 0 {
+			continue
+		}
+
+		rootSpan := spans[0]
+		summary := TraceSummary{
+			TraceID:           traceID,
+			ServiceName:       serviceName,
+			Name:              rootSpan.GetName(),
+			StartTimeUnixNano: rootSpan.GetStartTimeUnixNano(),
+			DurationNs:        rootSpan.GetEndTimeUnixNano() - rootSpan.GetStartTimeUnixNano(),
+			Status:            int(rootSpan.GetStatus().GetCode()),
+		}
+
+		summaries = append(summaries, summary)
+
+	}
+
+	return summaries, nil
 }

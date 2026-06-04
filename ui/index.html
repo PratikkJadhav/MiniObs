@@ -1,0 +1,1151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MiniObs — Minimal Observability</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+/* ───────────────── reset & tokens ───────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg0:#07090b;
+  --bg1:#0d1117;
+  --bg2:#161b22;
+  --bg3:#21262d;
+  --bg4:#30363d;
+  --border:#ffffff0f;
+  --border2:#ffffff1a;
+  --border3:#ffffff2e;
+  --text0:#f0f6fc;
+  --text1:#c9d1d9;
+  --text2:#8b949e;
+  --text3:#484f58;
+  --blue:#58a6ff;
+  --blue-dim:#1f6feb33;
+  --green:#3fb950;
+  --green-dim:#238636;
+  --amber:#d29922;
+  --amber-dim:#9e6a0333;
+  --red:#f85149;
+  --red-dim:#da363133;
+  --purple:#bc8cff;
+  --purple-dim:#6e40c933;
+  --mono:'IBM Plex Mono',monospace;
+  --sans:'IBM Plex Sans',sans-serif;
+  --rad:6px;
+  --rad-lg:10px;
+}
+
+html,body{height:100%;background:var(--bg0);color:var(--text1);font-family:var(--sans);font-size:14px;line-height:1.5}
+
+/* ───────────────── layout ───────────────── */
+.app{display:grid;grid-template-rows:48px 1fr;height:100vh;overflow:hidden}
+.topbar{
+  background:var(--bg1);
+  border-bottom:1px solid var(--border2);
+  display:flex;align-items:center;
+  padding:0 20px;gap:12px;
+  position:relative;z-index:10;
+}
+.body{display:grid;grid-template-columns:200px 1fr;overflow:hidden}
+.sidebar{background:var(--bg1);border-right:1px solid var(--border2);overflow-y:auto;padding:12px 0}
+.main-area{overflow-y:auto;padding:24px}
+
+/* ───────────────── topbar ───────────────── */
+.logo{
+  font-family:var(--mono);font-size:15px;font-weight:600;
+  color:var(--text0);letter-spacing:0.04em;
+  display:flex;align-items:center;gap:8px;white-space:nowrap;
+}
+.logo-badge{
+  background:var(--blue-dim);border:1px solid var(--blue);
+  color:var(--blue);font-size:9px;font-weight:500;
+  padding:1px 5px;border-radius:3px;letter-spacing:0.06em;
+}
+.server-input{
+  background:var(--bg2);border:1px solid var(--border2);
+  color:var(--text1);font-family:var(--mono);font-size:12px;
+  padding:5px 10px;border-radius:var(--rad);width:220px;
+  transition:border-color .15s;
+}
+.server-input:focus{outline:none;border-color:var(--blue)}
+.status-chip{
+  display:flex;align-items:center;gap:6px;
+  font-family:var(--mono);font-size:11px;
+  padding:4px 10px;border-radius:var(--rad);
+  border:1px solid var(--border2);color:var(--text2);
+  white-space:nowrap;
+}
+.status-dot{width:7px;height:7px;border-radius:50%;background:var(--text3);transition:background .3s}
+.status-dot.ok{background:var(--green);box-shadow:0 0 6px var(--green)}
+.status-dot.err{background:var(--red);box-shadow:0 0 6px var(--red)}
+.status-dot.pulse{animation:blink 1.4s ease-in-out infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+.ml-auto{margin-left:auto}
+.top-btn{
+  background:none;border:1px solid var(--border2);
+  color:var(--text2);font-family:var(--mono);font-size:11px;
+  padding:5px 12px;border-radius:var(--rad);cursor:pointer;
+  transition:all .15s;white-space:nowrap;
+}
+.top-btn:hover{border-color:var(--border3);color:var(--text1)}
+
+/* ───────────────── sidebar ───────────────── */
+.nav-group-label{
+  font-family:var(--mono);font-size:10px;color:var(--text3);
+  letter-spacing:.08em;padding:8px 16px 4px;text-transform:uppercase;
+}
+.nav-item{
+  display:flex;align-items:center;gap:9px;
+  padding:7px 16px;cursor:pointer;font-size:13px;color:var(--text2);
+  border-left:2px solid transparent;transition:all .1s;
+  user-select:none;
+}
+.nav-item svg{flex-shrink:0;opacity:.7}
+.nav-item:hover{color:var(--text0);background:var(--bg2)}
+.nav-item.active{color:var(--blue);border-left-color:var(--blue);background:var(--bg2)}
+.nav-item.active svg{opacity:1}
+.nav-divider{height:1px;background:var(--border);margin:8px 0}
+
+/* ───────────────── panes ───────────────── */
+.pane{display:none}
+.pane.active{display:block;animation:fadein .18s ease}
+@keyframes fadein{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}
+
+/* ───────────────── section headers ───────────────── */
+.section-header{
+  display:flex;align-items:center;justify-content:space-between;
+  margin-bottom:16px;
+}
+.section-title{
+  font-family:var(--mono);font-size:14px;font-weight:500;color:var(--text0);
+  display:flex;align-items:center;gap:8px;
+}
+.section-count{
+  font-family:var(--mono);font-size:11px;color:var(--text3);
+  background:var(--bg3);border:1px solid var(--border);
+  padding:1px 7px;border-radius:3px;
+}
+.controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+
+/* ───────────────── form elements ───────────────── */
+.inp{
+  background:var(--bg2);border:1px solid var(--border2);
+  color:var(--text1);font-family:var(--mono);font-size:12px;
+  padding:6px 10px;border-radius:var(--rad);transition:border-color .15s;
+}
+.inp:focus{outline:none;border-color:var(--blue)}
+.inp::placeholder{color:var(--text3)}
+.inp-sm{width:80px}
+.inp-md{width:150px}
+.sel{
+  background:var(--bg2);border:1px solid var(--border2);
+  color:var(--text2);font-family:var(--mono);font-size:12px;
+  padding:6px 8px;border-radius:var(--rad);cursor:pointer;
+}
+.btn{
+  background:var(--blue);border:none;
+  color:#000;font-family:var(--mono);font-size:12px;font-weight:600;
+  padding:6px 14px;border-radius:var(--rad);cursor:pointer;
+  transition:opacity .15s;white-space:nowrap;
+}
+.btn:hover{opacity:.85}
+.btn-ghost{
+  background:none;border:1px solid var(--border2);
+  color:var(--text2);font-family:var(--mono);font-size:12px;
+  padding:6px 12px;border-radius:var(--rad);cursor:pointer;
+  transition:all .15s;
+}
+.btn-ghost:hover{border-color:var(--border3);color:var(--text1)}
+
+/* ───────────────── stat cards ───────────────── */
+.stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px}
+.stat-card{
+  background:var(--bg2);border:1px solid var(--border2);
+  border-radius:var(--rad-lg);padding:14px 16px;
+}
+.stat-label{font-size:11px;color:var(--text3);letter-spacing:.05em;text-transform:uppercase;margin-bottom:6px}
+.stat-val{font-family:var(--mono);font-size:22px;font-weight:600;color:var(--text0)}
+.stat-val.blue{color:var(--blue)}
+.stat-val.green{color:var(--green)}
+.stat-val.amber{color:var(--amber)}
+.stat-val.red{color:var(--red)}
+.stat-sub{font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:3px}
+
+/* ───────────────── table ───────────────── */
+.table-wrap{
+  background:var(--bg2);border:1px solid var(--border2);
+  border-radius:var(--rad-lg);overflow:hidden;margin-bottom:16px;
+}
+.table-wrap table{width:100%;border-collapse:collapse}
+.table-wrap thead th{
+  background:var(--bg3);
+  padding:9px 14px;text-align:left;
+  font-family:var(--mono);font-size:10px;color:var(--text3);
+  text-transform:uppercase;letter-spacing:.07em;
+  border-bottom:1px solid var(--border2);white-space:nowrap;
+}
+.table-wrap tbody td{
+  padding:9px 14px;font-family:var(--mono);font-size:12px;
+  border-bottom:1px solid var(--border);vertical-align:middle;
+  color:var(--text1);
+}
+.table-wrap tbody tr:last-child td{border-bottom:none}
+.table-wrap tbody tr:hover td{background:var(--bg3);cursor:pointer}
+
+/* ───────────────── badges ───────────────── */
+.badge{
+  display:inline-block;font-family:var(--mono);font-size:10px;font-weight:500;
+  padding:2px 7px;border-radius:3px;white-space:nowrap;
+}
+.badge-green{background:var(--green-dim);color:var(--green);border:1px solid #238636}
+.badge-red{background:var(--red-dim);color:var(--red);border:1px solid #da3631}
+.badge-amber{background:var(--amber-dim);color:var(--amber);border:1px solid #9e6a03}
+.badge-blue{background:var(--blue-dim);color:var(--blue);border:1px solid #1f6feb}
+.badge-purple{background:var(--purple-dim);color:var(--purple);border:1px solid #6e40c9}
+.badge-gray{background:var(--bg3);color:var(--text2);border:1px solid var(--border2)}
+
+/* ───────────────── trace link ───────────────── */
+.trace-link{
+  color:var(--blue);cursor:pointer;
+  font-family:var(--mono);font-size:12px;
+  text-decoration:none;
+  transition:opacity .15s;
+}
+.trace-link:hover{opacity:.75;text-decoration:underline}
+
+/* ───────────────── duration bar ───────────────── */
+.dur-cell{display:flex;align-items:center;gap:8px}
+.dur-bar{flex:1;max-width:80px;height:3px;background:var(--bg4);border-radius:2px;overflow:hidden}
+.dur-fill{height:100%;background:var(--blue);opacity:.6;border-radius:2px;transition:width .3s}
+.dur-txt{color:var(--text2);font-size:11px;white-space:nowrap}
+
+/* ───────────────── error / empty / loading ───────────────── */
+.error-bar{
+  background:var(--red-dim);border:1px solid #da3631;
+  border-radius:var(--rad);padding:10px 14px;
+  font-family:var(--mono);font-size:12px;color:var(--red);
+  margin-bottom:12px;display:none;
+}
+.empty-state{
+  padding:48px;text-align:center;
+  font-family:var(--mono);font-size:12px;color:var(--text3);
+}
+.empty-icon{font-size:32px;margin-bottom:10px;opacity:.4}
+td.placeholder{text-align:center;padding:28px;color:var(--text3);font-size:12px}
+.spinner{
+  display:inline-block;width:11px;height:11px;
+  border:2px solid var(--border2);border-top-color:var(--blue);
+  border-radius:50%;animation:spin .7s linear infinite;
+  vertical-align:middle;margin-right:5px;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ───────────────── chart cards ───────────────── */
+.chart-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px}
+.chart-card{
+  background:var(--bg2);border:1px solid var(--border2);
+  border-radius:var(--rad-lg);padding:14px 16px;
+}
+.chart-card-title{
+  font-family:var(--mono);font-size:10px;color:var(--text3);
+  text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px;
+}
+.chart-legend{display:flex;gap:14px;margin-bottom:8px;flex-wrap:wrap}
+.chart-legend-item{display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:10px;color:var(--text2)}
+.legend-dot{width:8px;height:8px;border-radius:2px;flex-shrink:0}
+
+/* ───────────────── trace detail / span waterfall ───────────────── */
+.detail-panel{
+  background:var(--bg2);border:1px solid var(--border2);
+  border-radius:var(--rad-lg);padding:16px;margin-bottom:16px;
+  display:none;
+}
+.detail-panel.open{display:block}
+.detail-panel-header{
+  display:flex;justify-content:space-between;align-items:center;
+  margin-bottom:12px;
+}
+.detail-panel-title{font-family:var(--mono);font-size:12px;color:var(--text0);font-weight:500}
+.close-btn{background:none;border:none;color:var(--text3);cursor:pointer;font-size:16px;line-height:1;transition:color .15s}
+.close-btn:hover{color:var(--text1)}
+
+.waterfall{font-family:var(--mono);font-size:11px}
+.wf-header{
+  display:grid;grid-template-columns:180px 80px 60px 1fr;
+  gap:8px;padding:5px 0;
+  font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;
+  border-bottom:1px solid var(--border2);margin-bottom:4px;
+}
+.wf-row{
+  display:grid;grid-template-columns:180px 80px 60px 1fr;
+  gap:8px;padding:5px 0;border-bottom:1px solid var(--border);
+  align-items:center;
+}
+.wf-row:last-child{border-bottom:none}
+.wf-name{color:var(--text1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wf-svc{color:var(--text2);font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wf-track{position:relative;height:6px;background:var(--bg3);border-radius:3px;overflow:hidden}
+.wf-fill{position:absolute;top:0;height:100%;border-radius:3px;opacity:.75}
+
+/* ───────────────── log rows ───────────────── */
+.log-table-wrap{
+  background:var(--bg2);border:1px solid var(--border2);
+  border-radius:var(--rad-lg);overflow:hidden;
+}
+.log-header{
+  display:grid;grid-template-columns:140px 60px 130px 1fr;
+  gap:0;background:var(--bg3);
+  border-bottom:1px solid var(--border2);
+  font-family:var(--mono);font-size:10px;color:var(--text3);
+  text-transform:uppercase;letter-spacing:.07em;
+}
+.log-header-cell{padding:9px 12px}
+.log-row{
+  display:grid;grid-template-columns:140px 60px 130px 1fr;
+  gap:0;border-bottom:1px solid var(--border);
+  font-family:var(--mono);font-size:11px;align-items:center;
+  transition:background .1s;
+}
+.log-row:last-child{border-bottom:none}
+.log-row:hover{background:var(--bg3)}
+.log-cell{padding:7px 12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.log-ts{color:var(--text3);font-size:10px}
+.log-svc{color:var(--text2)}
+.log-body{color:var(--text1)}
+
+/* ───────────────── metric series list ───────────────── */
+.metric-series-item{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:8px 0;border-bottom:1px solid var(--border);
+}
+.metric-series-item:last-child{border-bottom:none}
+.metric-series-name{font-family:var(--mono);font-size:12px;color:var(--blue)}
+.metric-series-labels{font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:2px}
+.metric-series-val{font-family:var(--mono);font-size:14px;font-weight:500;color:var(--text0)}
+
+/* ───────────────── kv pairs ───────────────── */
+.kv-grid{display:grid;grid-template-columns:140px 1fr;gap:3px 12px;font-family:var(--mono);font-size:11px}
+.kv-key{color:var(--text3)}
+.kv-val{color:var(--text1);word-break:break-all}
+
+/* ───────────────── about pane ───────────────── */
+.about-card{
+  background:var(--bg2);border:1px solid var(--border2);
+  border-radius:var(--rad-lg);padding:24px;max-width:620px;
+}
+.about-title{font-family:var(--mono);font-size:18px;font-weight:600;color:var(--text0);margin-bottom:4px}
+.about-sub{font-size:12px;color:var(--text3);margin-bottom:20px}
+.endpoint-row{
+  display:flex;align-items:center;gap:10px;padding:6px 0;
+  border-bottom:1px solid var(--border);font-family:var(--mono);font-size:12px;
+}
+.endpoint-row:last-child{border-bottom:none}
+.method{color:var(--green);font-size:11px;min-width:32px}
+.endpoint-path{color:var(--text2)}
+.endpoint-desc{color:var(--text3);font-size:10px}
+
+/* ───────────────── responsive ───────────────── */
+@media(max-width:900px){
+  .stat-grid{grid-template-columns:1fr 1fr}
+  .chart-row{grid-template-columns:1fr}
+  .body{grid-template-columns:1fr}
+  .sidebar{display:none}
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ─── TOPBAR ─── -->
+  <header class="topbar">
+    <div class="logo">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+        <circle cx="9" cy="9" r="8" stroke="#58a6ff" stroke-width="1.2"/>
+        <circle cx="9" cy="9" r="3" fill="#58a6ff"/>
+        <line x1="9" y1="1" x2="9" y2="5" stroke="#58a6ff" stroke-width="1.2"/>
+        <line x1="9" y1="13" x2="9" y2="17" stroke="#58a6ff" stroke-width="1.2"/>
+        <line x1="1" y1="9" x2="5" y2="9" stroke="#58a6ff" stroke-width="1.2"/>
+        <line x1="13" y1="9" x2="17" y2="9" stroke="#58a6ff" stroke-width="1.2"/>
+      </svg>
+      miniobs
+      <span class="logo-badge">v0.1</span>
+    </div>
+
+    <input id="server-url" class="server-input inp" value="http://localhost:8080" placeholder="http://localhost:8080" title="MiniObs server URL" />
+
+    <div class="status-chip">
+      <div id="status-dot" class="status-dot pulse"></div>
+      <span id="status-text">checking...</span>
+    </div>
+
+    <div class="ml-auto" style="display:flex;gap:8px">
+      <button class="top-btn" onclick="refreshActive()">↺ Refresh</button>
+    </div>
+  </header>
+
+  <div class="body">
+
+    <!-- ─── SIDEBAR ─── -->
+    <nav class="sidebar">
+      <div class="nav-group-label">Signals</div>
+      <div class="nav-item active" id="nav-traces" onclick="showPane('traces')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+          <path d="M3 12h4l3-8 4 16 3-8h4"/>
+        </svg>
+        Traces
+      </div>
+      <div class="nav-item" id="nav-metrics" onclick="showPane('metrics')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+          <rect x="2" y="12" width="4" height="9" rx="1"/>
+          <rect x="9" y="7" width="4" height="14" rx="1"/>
+          <rect x="16" y="3" width="4" height="18" rx="1"/>
+        </svg>
+        Metrics
+      </div>
+      <div class="nav-item" id="nav-logs" onclick="showPane('logs')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14,2 14,8 20,8"/>
+          <line x1="8" y1="13" x2="16" y2="13"/>
+          <line x1="8" y1="17" x2="16" y2="17"/>
+        </svg>
+        Logs
+      </div>
+
+      <div class="nav-divider"></div>
+      <div class="nav-group-label">More</div>
+      <div class="nav-item" id="nav-about" onclick="showPane('about')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="12" y1="8" x2="12" y2="12"/>
+          <line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+        About
+      </div>
+    </nav>
+
+    <!-- ─── MAIN ─── -->
+    <main class="main-area">
+
+      <!-- ══════════════ TRACES PANE ══════════════ -->
+      <section class="pane active" id="pane-traces">
+
+        <div class="section-header">
+          <div class="section-title">
+            Traces
+            <span class="section-count" id="trace-count">0</span>
+          </div>
+          <div class="controls">
+            <input class="inp inp-md" id="trace-svc" placeholder="service name" title="Filter by service name" />
+            <input class="inp inp-sm" id="trace-limit" type="number" value="50" min="1" max="500" title="Max results" />
+            <button class="btn" onclick="loadTraces()">Fetch</button>
+          </div>
+        </div>
+
+        <!-- stat cards -->
+        <div class="stat-grid">
+          <div class="stat-card">
+            <div class="stat-label">Traces</div>
+            <div class="stat-val blue" id="ts-count">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">p50 latency</div>
+            <div class="stat-val green" id="ts-p50">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">p99 latency</div>
+            <div class="stat-val amber" id="ts-p99">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Error rate</div>
+            <div class="stat-val red" id="ts-err">—</div>
+          </div>
+        </div>
+
+        <!-- charts -->
+        <div class="chart-row">
+          <div class="chart-card">
+            <div class="chart-card-title">Latency distribution (ms)</div>
+            <div class="chart-legend">
+              <div class="chart-legend-item"><div class="legend-dot" style="background:#58a6ff"></div>p50</div>
+              <div class="chart-legend-item"><div class="legend-dot" style="background:#d29922"></div>p99</div>
+            </div>
+            <div style="position:relative;height:110px">
+              <canvas id="lat-chart" role="img" aria-label="Latency p50 and p99 chart"></canvas>
+            </div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-card-title">Duration histogram (ms)</div>
+            <div class="chart-legend">
+              <div class="chart-legend-item"><div class="legend-dot" style="background:#3fb950"></div>count</div>
+            </div>
+            <div style="position:relative;height:110px">
+              <canvas id="hist-chart" role="img" aria-label="Duration histogram"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- error bar -->
+        <div class="error-bar" id="trace-error"></div>
+
+        <!-- span detail -->
+        <div class="detail-panel" id="trace-detail">
+          <div class="detail-panel-header">
+            <div class="detail-panel-title" id="detail-title">Trace detail</div>
+            <button class="close-btn" onclick="closeDetail()" title="Close">✕</button>
+          </div>
+          <div class="waterfall">
+            <div class="wf-header">
+              <div>Span name</div>
+              <div>Service</div>
+              <div>Status</div>
+              <div>Timeline</div>
+            </div>
+            <div id="waterfall-rows"></div>
+          </div>
+        </div>
+
+        <!-- trace table -->
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Trace ID</th>
+                <th>Service</th>
+                <th>Root span</th>
+                <th>Status</th>
+                <th>Duration</th>
+                <th>Start time</th>
+              </tr>
+            </thead>
+            <tbody id="trace-tbody">
+              <tr><td colspan="6" class="placeholder">Enter a service name and click Fetch, or Fetch all.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+      </section>
+
+      <!-- ══════════════ METRICS PANE ══════════════ -->
+      <section class="pane" id="pane-metrics">
+
+        <div class="section-header">
+          <div class="section-title">Metrics</div>
+          <div class="controls">
+            <input class="inp inp-md" id="metric-name" placeholder="metric name (optional)" />
+            <button class="btn" onclick="loadMetrics()">Fetch</button>
+          </div>
+        </div>
+
+        <div class="stat-grid">
+          <div class="stat-card">
+            <div class="stat-label">Series</div>
+            <div class="stat-val blue" id="ms-series">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Data points</div>
+            <div class="stat-val" id="ms-points">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Latest</div>
+            <div class="stat-val green" id="ms-latest">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">p99 value</div>
+            <div class="stat-val amber" id="ms-p99">—</div>
+          </div>
+        </div>
+
+        <div class="error-bar" id="metric-error"></div>
+
+        <div class="chart-card" style="margin-bottom:16px">
+          <div class="chart-card-title" id="metric-chart-label">Time series</div>
+          <div style="position:relative;height:150px">
+            <canvas id="metric-chart" role="img" aria-label="Metric time series chart"></canvas>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Labels</th>
+                <th>Type</th>
+                <th>Latest value</th>
+                <th>Timestamp</th>
+              </tr>
+            </thead>
+            <tbody id="metric-tbody">
+              <tr><td colspan="5" class="placeholder">Click Fetch to load metrics.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+      </section>
+
+      <!-- ══════════════ LOGS PANE ══════════════ -->
+      <section class="pane" id="pane-logs">
+
+        <div class="section-header">
+          <div class="section-title">
+            Logs
+            <span class="section-count" id="log-count">0</span>
+          </div>
+          <div class="controls">
+            <input class="inp inp-md" id="log-svc" placeholder="service name" />
+            <select class="sel" id="log-sev">
+              <option value="">All severities</option>
+              <option value="ERROR">ERROR</option>
+              <option value="WARN">WARN</option>
+              <option value="INFO">INFO</option>
+              <option value="DEBUG">DEBUG</option>
+            </select>
+            <input class="inp inp-md" id="log-search" placeholder="search body…" />
+            <button class="btn" onclick="loadLogs()">Fetch</button>
+          </div>
+        </div>
+
+        <div class="stat-grid">
+          <div class="stat-card">
+            <div class="stat-label">Total</div>
+            <div class="stat-val blue" id="ls-total">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Errors</div>
+            <div class="stat-val red" id="ls-errors">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Warnings</div>
+            <div class="stat-val amber" id="ls-warns">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Info</div>
+            <div class="stat-val green" id="ls-info">—</div>
+          </div>
+        </div>
+
+        <div class="error-bar" id="log-error"></div>
+
+        <div class="log-table-wrap" id="log-stream">
+          <div class="empty-state">
+            <div class="empty-icon">◉</div>
+            Enter a service name and click Fetch.
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ══════════════ ABOUT PANE ══════════════ -->
+      <section class="pane" id="pane-about">
+        <div class="about-card">
+          <div class="about-title">miniobs</div>
+          <div class="about-sub">Minimal Observability Platform — built from scratch in Go</div>
+
+          <div class="kv-grid" style="margin-bottom:20px">
+            <div class="kv-key">Author</div>       <div class="kv-val">Pratik Jadhav · VIIT Pune</div>
+            <div class="kv-key">Language</div>     <div class="kv-val">Go 100%</div>
+            <div class="kv-key">Receiver</div>     <div class="kv-val">OTLP/gRPC + OTLP/HTTP</div>
+            <div class="kv-key">Storage</div>      <div class="kv-val">Custom append-only segments + disk-persisted indexes</div>
+            <div class="kv-key">Signals</div>      <div class="kv-val">Traces · Metrics · Logs</div>
+            <div class="kv-key">UI router</div>    <div class="kv-val">go-chi/chi v5</div>
+            <div class="kv-key">Repo</div>
+            <div class="kv-val">
+              <a href="https://github.com/PratikkJadhav/MiniObs" style="color:var(--blue)">github.com/PratikkJadhav/MiniObs</a>
+            </div>
+          </div>
+
+          <div style="font-family:var(--mono);font-size:11px;color:var(--text3);margin-bottom:8px;letter-spacing:.05em">HTTP API ENDPOINTS</div>
+
+          <div class="endpoint-row"><span class="method">GET</span><span class="endpoint-path">/api/traces</span><span class="endpoint-desc">?service=&limit=</span></div>
+          <div class="endpoint-row"><span class="method">GET</span><span class="endpoint-path">/api/traces/:traceID</span><span class="endpoint-desc">all spans for a trace</span></div>
+          <div class="endpoint-row"><span class="method">GET</span><span class="endpoint-path">/api/traces/latency</span><span class="endpoint-desc">?service= → p50/p99/p99</span></div>
+          <div class="endpoint-row"><span class="method">GET</span><span class="endpoint-path">/api/metrics</span><span class="endpoint-desc">?name= → series + data points</span></div>
+          <div class="endpoint-row"><span class="method">GET</span><span class="endpoint-path">/api/logs</span><span class="endpoint-desc">?service=&severity=&search=&limit=</span></div>
+
+          <div style="margin-top:20px;font-family:var(--mono);font-size:10px;color:var(--text3);line-height:1.7">
+            This UI file lives at <code style="color:var(--text2)">ui/index.html</code> and is served statically by the Go server.<br>
+            Point it at any MiniObs instance by changing the server URL in the top bar.
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<script>
+/* ─────────────────────────────────────────────
+   UTILITIES
+───────────────────────────────────────────── */
+const $ = id => document.getElementById(id);
+const base = () => $('server-url').value.replace(/\/$/, '');
+
+let latChart = null, histChart = null, metricChart = null;
+
+async function api(path) {
+  const r = await fetch(base() + path, { headers: { Accept: 'application/json' } });
+  if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
+  return r.json();
+}
+
+function setStatus(state, text) {
+  const dot = $('status-dot'), txt = $('status-text');
+  dot.className = 'status-dot ' + (state === 'ok' ? 'ok' : state === 'err' ? 'err' : 'pulse');
+  txt.textContent = text;
+}
+
+function showError(id, msg) { const el = $(id); el.style.display = 'block'; el.textContent = '⚠ ' + msg; }
+function hideError(id) { $(id).style.display = 'none'; }
+
+function showPane(name) {
+  document.querySelectorAll('.pane').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  $('pane-' + name).classList.add('active');
+  $('nav-' + name).classList.add('active');
+  window._activePane = name;
+}
+
+function refreshActive() {
+  const p = window._activePane || 'traces';
+  if (p === 'traces') loadTraces();
+  else if (p === 'metrics') loadMetrics();
+  else if (p === 'logs') loadLogs();
+}
+
+/* ─── formatting ─── */
+function fmtNs(ns) {
+  if (!ns && ns !== 0) return '—';
+  const us = ns / 1e3, ms = ns / 1e6;
+  if (ms >= 1000) return (ms / 1000).toFixed(2) + 's';
+  if (ms >= 1)    return ms.toFixed(2) + 'ms';
+  return us.toFixed(1) + 'µs';
+}
+
+function fmtTs(nanoTs) {
+  if (!nanoTs) return '—';
+  const d = new Date(nanoTs / 1e6);
+  if (isNaN(d)) return '—';
+  return d.toLocaleTimeString('en-US', { hour12: false }) + '.' + String(d.getMilliseconds()).padStart(3, '0');
+}
+
+function fmtHex(v) {
+  if (!v) return '—';
+  if (typeof v === 'string') return v.slice(0, 16);
+  if (Array.isArray(v)) return v.map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 16);
+  return String(v).slice(0, 16);
+}
+
+function statusBadge(code) {
+  /* OTel status: 0=unset, 1=ok, 2=error; also handle strings */
+  const isErr = code === 2 || code === 'error' || code === 'STATUS_CODE_ERROR';
+  return isErr
+    ? '<span class="badge badge-red">error</span>'
+    : '<span class="badge badge-green">ok</span>';
+}
+
+function sevBadge(s) {
+  s = (s || 'INFO').toUpperCase();
+  const cls = s === 'ERROR' ? 'badge-red' : s === 'WARN' ? 'badge-amber' : s === 'DEBUG' ? 'badge-purple' : 'badge-green';
+  return `<span class="badge ${cls}">${s}</span>`;
+}
+
+/* ─── percentile helper ─── */
+function pct(arr, p) {
+  if (!arr.length) return 0;
+  const s = [...arr].sort((a, b) => a - b);
+  return s[Math.floor(s.length * p)];
+}
+
+/* ─────────────────────────────────────────────
+   TRACES
+───────────────────────────────────────────── */
+async function loadTraces() {
+  hideError('trace-error');
+  closeDetail();
+  const svc   = $('trace-svc').value.trim();
+  const limit = $('trace-limit').value || 50;
+  const tbody = $('trace-tbody');
+  tbody.innerHTML = `<tr><td colspan="6" class="placeholder"><span class="spinner"></span>Fetching traces…</td></tr>`;
+
+  try {
+    let url = `/api/traces?limit=${limit}`;
+    if (svc) url += `&service=${encodeURIComponent(svc)}`;
+    const data = await api(url);
+    setStatus('ok', 'connected');
+
+    /* normalise — your API may return { traces:[…] } or an array directly */
+    const traces = data.traces || data || [];
+    $('trace-count').textContent = traces.length;
+    updateTraceStats(traces);
+    renderTraceTable(traces);
+    renderTraceCharts(traces);
+  } catch (e) {
+    setStatus('err', 'error');
+    showError('trace-error', e.message + ' — is MiniObs running?');
+    tbody.innerHTML = `<tr><td colspan="6" class="placeholder">Failed to fetch. Check server URL and CORS.</td></tr>`;
+  }
+}
+
+function updateTraceStats(traces) {
+  const durs = traces
+    .map(t => t.duration_ns || t.durationNs || t.duration || 0)
+    .filter(Boolean);
+  const errs = traces.filter(t => t.status === 2 || t.status === 'error' || t.statusCode === 2).length;
+  const errPct = traces.length ? ((errs / traces.length) * 100).toFixed(1) : 0;
+  $('ts-count').textContent = traces.length;
+  $('ts-p50').textContent   = fmtNs(pct(durs, 0.50));
+  $('ts-p99').textContent   = fmtNs(pct(durs, 0.99));
+  $('ts-err').textContent   = errPct + '%';
+}
+
+function renderTraceTable(traces) {
+  const tbody = $('trace-tbody');
+  if (!traces.length) {
+    tbody.innerHTML = `<tr><td colspan="6" class="placeholder">No traces found.</td></tr>`;
+    return;
+  }
+  const maxDur = Math.max(...traces.map(t => t.duration_ns || t.durationNs || t.duration || 0), 1);
+
+  tbody.innerHTML = traces.map(t => {
+    const tid  = fmtHex(t.trace_id || t.traceId || t.id || '');
+    const dur  = t.duration_ns || t.durationNs || t.duration || 0;
+    const pct  = Math.min(100, (dur / maxDur) * 80);
+    const svc  = t.service_name || t.serviceName || t.service || '—';
+    const op   = t.operation_name || t.operationName || t.name || t.rootSpanName || '—';
+    const ts   = fmtTs(t.start_time_unix_nano || t.startTimeUnixNano || t.startTime || 0);
+    const raw  = encodeURIComponent(t.trace_id || t.traceId || t.id || '');
+    return `<tr onclick="loadTrace('${raw}')">
+      <td><a class="trace-link">${tid}…</a></td>
+      <td><span class="badge badge-blue">${svc}</span></td>
+      <td style="color:var(--text1)">${op}</td>
+      <td>${statusBadge(t.status || t.statusCode)}</td>
+      <td>
+        <div class="dur-cell">
+          <div class="dur-bar"><div class="dur-fill" style="width:${pct.toFixed(0)}%"></div></div>
+          <span class="dur-txt">${fmtNs(dur)}</span>
+        </div>
+      </td>
+      <td style="color:var(--text3);font-size:11px">${ts}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderTraceCharts(traces) {
+  const durs = traces
+    .map(t => (t.duration_ns || t.durationNs || t.duration || 0) / 1e6)
+    .filter(Boolean);
+
+  if (!durs.length) return;
+
+  /* ── latency p50/p99 over sorted trace list ── */
+  const N = Math.min(20, durs.length);
+  const step = Math.max(1, Math.floor(durs.length / N));
+  const labels = [], p50s = [], p99s = [];
+  for (let i = step; i <= durs.length; i += step) {
+    const slice = durs.slice(0, i);
+    labels.push(i);
+    p50s.push(+pct(slice, 0.50).toFixed(2));
+    p99s.push(+pct(slice, 0.99).toFixed(2));
+  }
+
+  if (latChart) latChart.destroy();
+  latChart = new Chart($('lat-chart').getContext('2d'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: 'p50', data: p50s, borderColor: '#58a6ff', backgroundColor: '#58a6ff18', tension: 0.4, pointRadius: 0, borderWidth: 1.5, fill: true },
+        { label: 'p99', data: p99s, borderColor: '#d29922', backgroundColor: '#d2992210', tension: 0.4, pointRadius: 0, borderWidth: 1.5 }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { display: false },
+        y: { ticks: { color: '#484f58', font: { size: 10 }, maxTicksLimit: 4 }, grid: { color: '#ffffff08' } }
+      }
+    }
+  });
+
+  /* ── histogram of durations ── */
+  const buckets = 10;
+  const maxD = Math.max(...durs);
+  const binSize = maxD / buckets;
+  const counts = new Array(buckets).fill(0);
+  const binLabels = [];
+  durs.forEach(d => { const idx = Math.min(buckets - 1, Math.floor(d / binSize)); counts[idx]++; });
+  for (let i = 0; i < buckets; i++) binLabels.push(`${(i * binSize).toFixed(0)}ms`);
+
+  if (histChart) histChart.destroy();
+  histChart = new Chart($('hist-chart').getContext('2d'), {
+    type: 'bar',
+    data: { labels: binLabels, datasets: [{ label: 'count', data: counts, backgroundColor: '#3fb95040', borderColor: '#3fb950', borderWidth: 1 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#484f58', font: { size: 9 }, maxRotation: 45, autoSkip: false }, grid: { display: false } },
+        y: { ticks: { color: '#484f58', font: { size: 10 }, maxTicksLimit: 4 }, grid: { color: '#ffffff08' } }
+      }
+    }
+  });
+}
+
+/* ─── single trace detail ─── */
+async function loadTrace(rawId) {
+  const traceId = decodeURIComponent(rawId);
+  if (!traceId || traceId === '—') return;
+  try {
+    const data = await api(`/api/traces/${rawId}`);
+    const spans = data.spans || data || [];
+    renderWaterfall(traceId, spans);
+  } catch (e) {
+    showError('trace-error', 'Failed to load trace: ' + e.message);
+  }
+}
+
+function renderWaterfall(traceId, spans) {
+  const panel = $('trace-detail');
+  panel.classList.add('open');
+  $('detail-title').textContent = 'Trace · ' + traceId.slice(0, 32) + (traceId.length > 32 ? '…' : '');
+
+  if (!spans.length) {
+    $('waterfall-rows').innerHTML = '<div style="color:var(--text3);font-family:var(--mono);font-size:12px;padding:8px 0">No spans found.</div>';
+    return;
+  }
+
+  const minStart = Math.min(...spans.map(s => s.start_time_unix_nano || s.startTimeUnixNano || 0));
+  const maxEnd   = Math.max(...spans.map(s => {
+    const start = s.start_time_unix_nano || s.startTimeUnixNano || 0;
+    const dur   = s.duration_ns || s.durationNs || s.duration || 0;
+    return start + dur;
+  }));
+  const totalDur = maxEnd - minStart || 1;
+
+  const colors = ['#58a6ff', '#3fb950', '#d29922', '#bc8cff', '#f85149'];
+
+  $('waterfall-rows').innerHTML = spans.map((s, i) => {
+    const start  = (s.start_time_unix_nano || s.startTimeUnixNano || 0) - minStart;
+    const dur    = s.duration_ns || s.durationNs || s.duration || 0;
+    const left   = (start / totalDur * 100).toFixed(1);
+    const width  = Math.max(0.5, (dur / totalDur * 100)).toFixed(1);
+    const color  = colors[i % colors.length];
+    const name   = s.name || s.operation_name || s.operationName || 'span';
+    const svc    = s.service_name || s.serviceName || s.service || '';
+    return `<div class="wf-row">
+      <div class="wf-name" title="${name}">${name}</div>
+      <div class="wf-svc">${svc}</div>
+      <div>${statusBadge(s.status || s.statusCode)}</div>
+      <div>
+        <div class="wf-track">
+          <div class="wf-fill" style="left:${left}%;width:${width}%;background:${color}"></div>
+        </div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:2px">${fmtNs(dur)}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function closeDetail() {
+  $('trace-detail').classList.remove('open');
+}
+
+/* ─────────────────────────────────────────────
+   METRICS
+───────────────────────────────────────────── */
+async function loadMetrics() {
+  hideError('metric-error');
+  const name  = $('metric-name').value.trim();
+  const tbody = $('metric-tbody');
+  tbody.innerHTML = `<tr><td colspan="5" class="placeholder"><span class="spinner"></span>Fetching metrics…</td></tr>`;
+
+  try {
+    let url = '/api/metrics';
+    if (name) url += `?name=${encodeURIComponent(name)}`;
+    const data = await api(url);
+    setStatus('ok', 'connected');
+
+    const series = data.series || data.metrics || (Array.isArray(data) ? data : []);
+    renderMetrics(series, name);
+  } catch (e) {
+    setStatus('err', 'error');
+    showError('metric-error', e.message);
+    tbody.innerHTML = `<tr><td colspan="5" class="placeholder">Failed to fetch metrics.</td></tr>`;
+  }
+}
+
+function renderMetrics(series, label) {
+  $('ms-series').textContent = series.length;
+
+  let allPts = [];
+  series.forEach(s => {
+    const pts = s.data_points || s.dataPoints || s.points || [];
+    allPts = allPts.concat(pts);
+  });
+
+  const vals = allPts.map(p => p.value || p.as_double || p.asDouble || 0);
+  const sorted = [...vals].sort((a, b) => a - b);
+
+  $('ms-points').textContent  = allPts.length;
+  $('ms-latest').textContent  = vals.length ? vals[vals.length - 1].toFixed(4) : '—';
+  $('ms-p99').textContent     = sorted.length ? sorted[Math.floor(sorted.length * 0.99)].toFixed(4) : '—';
+
+  renderMetricChart(allPts, label);
+
+  if (!series.length) {
+    $('metric-tbody').innerHTML = `<tr><td colspan="5" class="placeholder">No metrics found.</td></tr>`;
+    return;
+  }
+
+  $('metric-tbody').innerHTML = series.map(s => {
+    const pts = s.data_points || s.dataPoints || s.points || [];
+    const last = pts.length ? pts[pts.length - 1] : null;
+    const lv   = last ? (last.value || last.as_double || last.asDouble || 0).toFixed(4) : '—';
+    const lt   = last ? fmtTs(last.timestamp_unix_nano || last.timestampUnixNano || last.timestamp || 0) : '—';
+    const lbl  = JSON.stringify(s.labels || s.attributes || {});
+    return `<tr>
+      <td style="color:var(--blue);font-family:var(--mono)">${s.name || label || '—'}</td>
+      <td style="color:var(--text3);font-size:10px">${lbl !== '{}' ? lbl : '—'}</td>
+      <td><span class="badge badge-gray">${s.type || 'gauge'}</span></td>
+      <td style="color:var(--text0)">${lv}</td>
+      <td style="color:var(--text3);font-size:11px">${lt}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderMetricChart(pts, label) {
+  if (!pts.length) return;
+  const sorted = [...pts].sort((a, b) =>
+    (a.timestamp_unix_nano || a.timestampUnixNano || 0) - (b.timestamp_unix_nano || b.timestampUnixNano || 0)
+  );
+  const vals   = sorted.map(p => +(p.value || p.as_double || p.asDouble || 0));
+  const labels = sorted.map((_, i) => i + 1);
+
+  $('metric-chart-label').textContent = 'Time series' + (label ? ' — ' + label : '');
+  if (metricChart) metricChart.destroy();
+  metricChart = new Chart($('metric-chart').getContext('2d'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: label || 'value',
+        data: vals,
+        borderColor: '#58a6ff',
+        backgroundColor: '#58a6ff18',
+        tension: 0.3,
+        pointRadius: vals.length < 50 ? 3 : 0,
+        borderWidth: 1.5,
+        fill: true
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { display: false },
+        y: { ticks: { color: '#484f58', font: { size: 10 }, maxTicksLimit: 5 }, grid: { color: '#ffffff08' } }
+      }
+    }
+  });
+}
+
+/* ─────────────────────────────────────────────
+   LOGS
+───────────────────────────────────────────── */
+async function loadLogs() {
+  hideError('log-error');
+  const svc    = $('log-svc').value.trim();
+  const sev    = $('log-sev').value;
+  const search = $('log-search').value.trim();
+  const stream = $('log-stream');
+  stream.innerHTML = '<div class="empty-state"><span class="spinner"></span>Fetching logs…</div>';
+
+  try {
+    let url = '/api/logs?limit=200';
+    if (svc)    url += `&service=${encodeURIComponent(svc)}`;
+    if (sev)    url += `&severity=${encodeURIComponent(sev)}`;
+    if (search) url += `&search=${encodeURIComponent(search)}`;
+    const data = await api(url);
+    setStatus('ok', 'connected');
+
+    const logs = data.logs || data || [];
+    $('log-count').textContent = logs.length;
+    updateLogStats(logs);
+    renderLogs(logs);
+  } catch (e) {
+    setStatus('err', 'error');
+    showError('log-error', e.message);
+    stream.innerHTML = '<div class="empty-state">Failed to fetch logs.</div>';
+  }
+}
+
+function updateLogStats(logs) {
+  const errs  = logs.filter(l => (l.severity || l.severityText || '').toUpperCase() === 'ERROR').length;
+  const warns = logs.filter(l => (l.severity || l.severityText || '').toUpperCase() === 'WARN').length;
+  const info  = logs.filter(l => (l.severity || l.severityText || '').toUpperCase() === 'INFO').length;
+  $('ls-total').textContent  = logs.length;
+  $('ls-errors').textContent = errs;
+  $('ls-warns').textContent  = warns;
+  $('ls-info').textContent   = info;
+}
+
+function renderLogs(logs) {
+  const stream = $('log-stream');
+  if (!logs.length) {
+    stream.innerHTML = '<div class="empty-state"><div class="empty-icon">◉</div>No logs found.</div>';
+    return;
+  }
+  const header = `<div class="log-header">
+    <div class="log-header-cell">Timestamp</div>
+    <div class="log-header-cell">Sev</div>
+    <div class="log-header-cell">Service</div>
+    <div class="log-header-cell">Message</div>
+  </div>`;
+  const rows = logs.map(l => {
+    const sev  = (l.severity || l.severityText || 'INFO').toUpperCase();
+    const ts   = fmtTs(l.timestamp_unix_nano || l.timestampUnixNano || l.timestamp || 0);
+    const svc  = l.service_name || l.serviceName || (l.resource && l.resource['service.name']) || '—';
+    const body = (l.body || l.message || l.log || '').replace(/</g, '&lt;');
+    return `<div class="log-row">
+      <div class="log-cell log-ts">${ts}</div>
+      <div class="log-cell">${sevBadge(sev)}</div>
+      <div class="log-cell log-svc">${svc}</div>
+      <div class="log-cell log-body" title="${body}">${body}</div>
+    </div>`;
+  }).join('');
+  stream.innerHTML = header + rows;
+}
+
+/* ─────────────────────────────────────────────
+   HEALTH CHECK
+───────────────────────────────────────────── */
+async function healthCheck() {
+  try {
+    /* try /health first, fall back to a lightweight traces ping */
+    let ok = false;
+    try {
+      const r = await fetch(base() + '/health', { signal: AbortSignal.timeout(2500) });
+      ok = r.ok;
+    } catch (_) {
+      const r2 = await fetch(base() + '/api/traces?limit=1', { signal: AbortSignal.timeout(2500) });
+      ok = r2.ok;
+    }
+    setStatus(ok ? 'ok' : 'err', ok ? 'connected' : 'unreachable');
+  } catch (_) {
+    setStatus('err', 'unreachable');
+  }
+}
+
+/* ─── boot ─── */
+window._activePane = 'traces';
+healthCheck();
+setInterval(healthCheck, 15000);
+</script>
+</body>
+</html>
